@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useState } from "react";
 import { YDocProvider } from "@y-sweet/react";
 import { usePathname } from "next/navigation";
 import { SlateEditor } from "../../../components/slate/SlateEditor";
@@ -8,6 +8,7 @@ import EditableDocTitle from "../../../components/document/editable-doc-title";
 import CopyLink from "../../../components/document/copy-link";
 import PermissionsToggle from "../../../components/document/permissions-toggle";
 import InviteByEmail from "../../../components/document/invite-by-email";
+import DocumentHistory from "../../../components/document/document-history";
 import { getDocMetadata, saveDocumentVersion } from "@/utils/supabase/queries";
 import Loading from "@/components/loading";
 
@@ -26,25 +27,24 @@ export default function DocumentPage() {
   const pathname = usePathname();
   const docId = pathname.split("/").pop();
   const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [toolTipMessage, setToolTipMessage] = React.useState("");
   const [docMetadata, setDocMetadata] = React.useState<DocumentMetadata | null>(
     null,
   );
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [editorContent, setEditorContent] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchDocMetadata() {
       if (!docId) return;
-
       let { data: docsData, error } = await getDocMetadata(docId);
-
       if (error || !docsData) {
         setError(error ?? "Document not found");
         setLoading(false);
         return;
       }
-
       if (docsData) {
         setDocMetadata({
           name: docsData.name ?? "Untitled Document",
@@ -59,12 +59,12 @@ export default function DocumentPage() {
         setLoading(false);
       }
     }
-
     fetchDocMetadata();
   }, [docId]);
 
   const handleSaveVersion = useCallback(async (documentContent: string) => {
     if (!docId) return;
+    setEditorContent(documentContent);
     
     try {
       const result = await saveDocumentVersion(docId, documentContent);
@@ -81,10 +81,21 @@ export default function DocumentPage() {
   }, [docId]);
 
   const handleManualSave = useCallback(async () => {
-    // This is a placeholder for manual saves
-    // In a real implementation, you would extract the content from the editor
-    handleSaveVersion("Manual save triggered");
-  }, [handleSaveVersion]);
+    // If we have editor content stored, use it for the manual save
+    if (editorContent) {
+      handleSaveVersion(editorContent);
+    } else {
+      // This is a placeholder for manual saves without content
+      handleSaveVersion("Manual save triggered");
+    }
+  }, [handleSaveVersion, editorContent]);
+
+  const handleVersionRestore = useCallback((content: string) => {
+    // This will be called when a version is restored
+    setEditorContent(content);
+    // We might need to call some editor method to update the content
+    // This depends on how the SlateEditor component is implemented
+  }, []);
 
   if (loading) {
     return <Loading />;
@@ -109,6 +120,9 @@ export default function DocumentPage() {
           )}
         </div>
         <div className="flex gap-2">
+          <Button onClick={() => setIsHistoryOpen(true)} variant="outline">
+            History
+          </Button>
           <Button onClick={handleManualSave} variant="outline">
             Save Version
           </Button>
@@ -118,6 +132,8 @@ export default function DocumentPage() {
       <YDocProvider docId={docId} authEndpoint="/api/auth">
         <SlateEditor onContentChange={handleSaveVersion} />
       </YDocProvider>
+      
+      {/* Share Modal */}
       {isModalOpen && docMetadata && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
           <div className="relative bg-white rounded-lg p-6 w-full max-w-lg text-black ">
@@ -142,6 +158,24 @@ export default function DocumentPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+      
+      {/* Document History Dialog */}
+      {docId && (
+        <DocumentHistory 
+          docId={docId}
+          isOpen={isHistoryOpen}
+          setIsOpen={setIsHistoryOpen}
+          setToolTipMessage={setToolTipMessage}
+          onVersionRestore={handleVersionRestore}
+        />
+      )}
+      
+      {/* Tooltip message for notifications */}
+      {toolTipMessage && !isModalOpen && (
+        <div className="fixed bottom-4 right-4 bg-gray-800 text-white text-sm py-2 px-4 rounded shadow-lg">
+          {toolTipMessage}
         </div>
       )}
     </div>

@@ -357,3 +357,146 @@ export async function saveDocumentVersion(docId: string, content: string) {
     error: null
   };
 }
+
+
+
+
+// Add a function to retrieve document version history
+export async function getDocumentVersions(docId: string) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  
+  if (!user?.id) {
+    return {
+      data: null,
+      error: "User not authenticated"
+    };
+  }
+
+  // First check if user has access to the document
+  const { data: docData, error: docError } = await supabase
+    .from("documents")
+    .select("owner_id, collaborators")
+    .eq("id", docId)
+    .single();
+
+  if (docError || !docData) {
+    return {
+      data: null,
+      error: "Document not found"
+    };
+  }
+
+  // Verify user has access to the document
+  if (docData.owner_id !== user.id && !docData.collaborators?.includes(user.id)) {
+    return {
+      data: null,
+      error: "You don't have permission to view versions of this document"
+    };
+  }
+
+  // Get all versions of the document
+  const { data: versions, error: versionsError } = await supabase
+    .from("document_versions")
+    .select(`
+      id,
+      document_id,
+      version_number,
+      created_at,
+      created_by,
+      profiles:created_by (display_name, email)
+    `)
+    .eq("document_id", docId)
+    .order("version_number", { ascending: false });
+
+  if (versionsError) {
+    return {
+      data: null,
+      error: `Failed to get document versions: ${versionsError.message}`
+    };
+  }
+
+  return {
+    data: versions,
+    error: null
+  };
+}
+
+// Add function to restore a specific document version
+export async function restoreDocumentVersion(docId: string, versionId: string) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  
+  if (!user?.id) {
+    return {
+      data: null,
+      error: "User not authenticated"
+    };
+  }
+
+  // Check document access
+  const { data: docData, error: docError } = await supabase
+    .from("documents")
+    .select("owner_id, collaborators, version_count")
+    .eq("id", docId)
+    .single();
+
+  if (docError || !docData) {
+    return {
+      data: null,
+      error: "Document not found"
+    };
+  }
+
+  // Verify user has access to the document
+  if (docData.owner_id !== user.id && !docData.collaborators?.includes(user.id)) {
+    return {
+      data: null,
+      error: "You don't have permission to restore versions of this document"
+    };
+  }
+
+  // Get the content of the specified version
+  const { data: versionData, error: versionError } = await supabase
+    .from("document_versions")
+    .select("content")
+    .eq("id", versionId)
+    .eq("document_id", docId)
+    .single();
+
+  if (versionError || !versionData) {
+    return {
+      data: null,
+      error: "Version not found"
+    };
+  }
+
+  // Create a new version with the content from the old version
+  const newVersionNumber = docData.version_count + 1;
+  
+  const { error: restoreError } = await supabase.rpc('create_document_version', {
+    doc_id: docId,
+    doc_content: versionData.content,
+    version_num: newVersionNumber,
+    user_id: user.id
+  });
+
+  if (restoreError) {
+    return {
+      data: null,
+      error: `Failed to restore document version: ${restoreError.message}`
+    };
+  }
+
+  return {
+    data: {
+      version_number: newVersionNumber,
+      content: versionData.content
+    },
+    error: null
+  };
+}
